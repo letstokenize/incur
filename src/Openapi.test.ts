@@ -35,106 +35,6 @@ function json(output: string) {
   return JSON.parse(output.replace(/"duration": "[^"]+"/g, '"duration": "<stripped>"'))
 }
 
-/** Operations whose JSON request bodies are composed with `anyOf`, `oneOf`, or `allOf`. */
-const composedSpec = {
-  openapi: '3.1.0',
-  info: { title: 'Composed API', version: '1.0.0' },
-  paths: {
-    '/events': {
-      post: {
-        operationId: 'createEvent',
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                oneOf: [
-                  {
-                    type: 'object',
-                    properties: { kind: { const: 'push' }, ref: { type: 'string' } },
-                    required: ['kind', 'ref'],
-                  },
-                  {
-                    type: 'object',
-                    properties: { kind: { const: 'tag' }, name: { type: 'string' } },
-                    required: ['kind', 'name'],
-                  },
-                ],
-              },
-            },
-          },
-        },
-        responses: { '200': { description: 'OK' } },
-      },
-    },
-    '/items': {
-      post: {
-        operationId: 'createItem',
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                allOf: [
-                  { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-                  { type: 'object', properties: { note: { type: 'string' } } },
-                ],
-              },
-            },
-          },
-        },
-        responses: { '200': { description: 'OK' } },
-      },
-    },
-    '/policy': {
-      put: {
-        operationId: 'setPolicy',
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                anyOf: [
-                  {
-                    type: 'object',
-                    properties: { enabled: { const: false } },
-                    required: ['enabled'],
-                  },
-                  {
-                    type: 'object',
-                    properties: { enabled: { const: true }, limit: { type: 'string' } },
-                    required: ['enabled', 'limit'],
-                  },
-                ],
-              },
-            },
-          },
-        },
-        responses: { '200': { description: 'OK' } },
-      },
-    },
-    '/rpc': {
-      post: {
-        operationId: 'rpc',
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                anyOf: [
-                  {
-                    type: 'object',
-                    properties: { method: { type: 'string' }, params: { type: 'array' } },
-                    required: ['method'],
-                  },
-                  { type: 'array', items: { type: 'object' } },
-                ],
-              },
-            },
-          },
-        },
-        responses: { '200': { description: 'OK' } },
-      },
-    },
-  },
-} as const
-
 function openapiUrl() {
   return `data:application/json,${encodeURIComponent(JSON.stringify(spec))}`
 }
@@ -463,6 +363,106 @@ describe('generateCommands', () => {
     expect(id && '_group' in id ? id.description : undefined).toMatchInlineSnapshot(`"One user"`)
     expect(commands.has('missing')).toBe(false)
   })
+
+  /** Operations whose JSON request bodies are composed with `anyOf`, `oneOf`, or `allOf`. */
+  const composedSpec = {
+    openapi: '3.1.0',
+    info: { title: 'Composed API', version: '1.0.0' },
+    paths: {
+      '/events': {
+        post: {
+          operationId: 'createEvent',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      properties: { kind: { const: 'push' }, ref: { type: 'string' } },
+                      required: ['kind', 'ref'],
+                    },
+                    {
+                      type: 'object',
+                      properties: { kind: { const: 'tag' }, name: { type: 'string' } },
+                      required: ['kind', 'name'],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+      '/items': {
+        post: {
+          operationId: 'createItem',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+                    { type: 'object', properties: { note: { type: 'string' } } },
+                  ],
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+      '/policy': {
+        put: {
+          operationId: 'setPolicy',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  anyOf: [
+                    {
+                      type: 'object',
+                      properties: { enabled: { const: false } },
+                      required: ['enabled'],
+                    },
+                    {
+                      type: 'object',
+                      properties: { enabled: { const: true }, limit: { type: 'string' } },
+                      required: ['enabled', 'limit'],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+      '/rpc': {
+        post: {
+          operationId: 'rpc',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  anyOf: [
+                    {
+                      type: 'object',
+                      properties: { method: { type: 'string' }, params: { type: 'array' } },
+                      required: ['method'],
+                    },
+                    { type: 'array', items: { type: 'object' } },
+                  ],
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+    },
+  } as const
 
   test('flattens composed request bodies into options', async () => {
     const commands = await Openapi.generateCommands(composedSpec, app.fetch)

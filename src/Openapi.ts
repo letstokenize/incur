@@ -655,80 +655,57 @@ function isSchemaObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Named request-body fields and the subset every valid body must carry. */
+/** Request-body fields and the names every valid body must include. */
 type BodyFields = {
   properties: Record<string, Record<string, unknown>>
   required: string[]
 }
 
-/**
- * Flattens a request-body schema into named fields, merging `allOf` members and
- * `anyOf`/`oneOf` object variants so composed bodies still generate options.
- * The server validates the exact shape.
- */
+/** Flattens a request-body schema into option fields, merging `allOf` members and `anyOf`/`oneOf` object variants. */
 function bodyFields(schema: unknown): BodyFields {
   if (!isSchemaObject(schema)) return { properties: {}, required: [] }
-  const members: BodyFields[] = [
-    {
-      properties: (isSchemaObject(schema.properties)
-        ? schema.properties
-        : {}) as BodyFields['properties'],
-      required: Array.isArray(schema.required) ? (schema.required as string[]) : [],
-    },
+  const members = [
+    { properties: objectProperties(schema), required: requiredProperties(schema) },
+    ...(Array.isArray(schema.allOf) ? schema.allOf.map(bodyFields) : []),
   ]
-  for (const member of Array.isArray(schema.allOf) ? schema.allOf : [])
-    members.push(bodyFields(member))
   for (const key of ['anyOf', 'oneOf']) {
     if (!Array.isArray(schema[key])) continue
-    const variants = (schema[key] as unknown[]).filter(isObjectVariant).map(bodyFields)
-    if (variants.length > 0) members.push(mergeVariants(variants))
+    const variants = schema[key].filter(isObjectVariant).map(bodyFields)
+    if (variants.length === 0) continue
+    // Any one variant may be sent, so a field stays required only when every variant requires it.
+    members.push({
+      properties: mergeProperties(variants, 'anyOf'),
+      required: variants.reduce<string[]>(
+        (names, variant) => names.filter((name) => variant.required.includes(name)),
+        variants[0]!.required,
+      ),
+    })
   }
-  return mergeMembers(members)
+  // Every member applies at once, so fields accumulate and any member's requirement holds.
+  return {
+    properties: mergeProperties(members, 'allOf'),
+    required: [...new Set(members.flatMap((member) => member.required))],
+  }
 }
 
-/** Whether a union variant can be an object; others (e.g. a JSON-RPC batch array) carry no named fields. */
+/** Whether a union variant can be an object; others (e.g. a JSON-RPC batch array) carry no fields. */
 function isObjectVariant(schema: unknown) {
   if (!isSchemaObject(schema)) return false
   const { type } = schema
   return type === undefined || type === 'object' || (Array.isArray(type) && type.includes('object'))
 }
 
-/** Merges `anyOf`/`oneOf` variants: any one may be sent, so a field is required only when every variant requires it. */
-function mergeVariants(variants: BodyFields[]): BodyFields {
+/** Merges same-named fields, joining their distinct schemas under `keyword`. */
+function mergeProperties(fields: BodyFields[], keyword: 'allOf' | 'anyOf') {
   const properties: BodyFields['properties'] = {}
-  for (const name of new Set(variants.flatMap((variant) => Object.keys(variant.properties))))
-    properties[name] = combineSchemas(
-      'anyOf',
-      variants.flatMap((variant) => (variant.properties[name] ? [variant.properties[name]] : [])),
+  for (const name of new Set(fields.flatMap((field) => Object.keys(field.properties)))) {
+    const schemas = fields.flatMap<Record<string, unknown>>((field) => field.properties[name] ?? [])
+    const distinct = schemas.filter(
+      (schema, index) => schemas.findIndex((other) => sameSchema(schema, other)) === index,
     )
-  const [first, ...rest] = variants
-  const required = rest.reduce(
-    (names, variant) => names.filter((name) => variant.required.includes(name)),
-    first?.required ?? [],
-  )
-  return { properties, required }
-}
-
-/** Merges `allOf` members: all apply at once, so fields accumulate and stay required wherever any member requires them. */
-function mergeMembers(members: BodyFields[]): BodyFields {
-  const properties: BodyFields['properties'] = {}
-  for (const name of new Set(members.flatMap((member) => Object.keys(member.properties))))
-    properties[name] = combineSchemas(
-      'allOf',
-      members.flatMap((member) => (member.properties[name] ? [member.properties[name]] : [])),
-    )
-  return { properties, required: [...new Set(members.flatMap((member) => member.required))] }
-}
-
-/** Returns the single distinct schema, or the distinct schemas joined under `keyword`. */
-function combineSchemas(
-  keyword: 'allOf' | 'anyOf',
-  schemas: Record<string, unknown>[],
-): Record<string, unknown> {
-  const distinct = schemas.filter(
-    (schema, index) => schemas.findIndex((other) => sameSchema(schema, other)) === index,
-  )
-  return distinct.length === 1 ? distinct[0]! : { [keyword]: distinct }
+    properties[name] = distinct.length === 1 ? distinct[0]! : { [keyword]: distinct }
+  }
+  return properties
 }
 
 function sameSchema(a: unknown, b: unknown) {
